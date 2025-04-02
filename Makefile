@@ -1,5 +1,5 @@
 CC = clang
-CFLAGS = -O3 -lm
+CFLAGS = -O3 -lm -lz
 TARGET = main
 SOURCES = main.c
 
