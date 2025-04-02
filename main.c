@@ -164,6 +164,12 @@ int fill_and_save_byte_array(const char *output_file, const int *colors) {
     gzclose(dest);
     return 0;
 }
+
+// Helper function to compare filenames for sorting
+int compare_filenames(const void *a, const void *b) {
+    return strcmp(*(const char **)a, *(const char **)b);
+}
+
 void process_directory(const char *input_directory, const char *output_directory) {
     struct dirent *entry;
     DIR *dp = opendir(input_directory);
@@ -173,67 +179,88 @@ void process_directory(const char *input_directory, const char *output_directory
         return;
     }
 
-    int map_count = 0; // Counter for the processed maps
+    // Collect all filenames in a list
+    char **filenames = NULL;
+    size_t file_count = 0;
 
     while ((entry = readdir(dp)) != NULL) {
         // Check if the file has a .png or .jpg extension
-        if (strstr(entry->d_name, ".png") || strstr(entry->d_name, ".jpg")) {
-            char input_path[512];
-            snprintf(input_path, sizeof(input_path), "%s/%s", input_directory, entry->d_name);
-
-            // Load the image
-            int width, height, channels;
-            unsigned char *image = stbi_load(input_path, &width, &height, &channels, 3);
-            if (!image) {
-                fprintf(stderr, "Failed to load image: %s\n", input_path);
-                continue;
-            }
-
-            // Calculate new dimensions
-            int new_width, new_height;
-            if (width > height) {
-                new_width = 128;
-                new_height = (height * 128) / width;
-            } else {
-                new_height = 128;
-                new_width = (width * 128) / height;
-            }
-
-            // Resize the image
-            unsigned char *resized_image = malloc(128 * 128 * 3);
-            memset(resized_image, 0, 128 * 128 * 3); // Fill with black (0, 0, 0)
-            stbir_resize_uint8(image, width, height, 0, resized_image, new_width, new_height, 0, 3);
-
-            // Free the original image
-            stbi_image_free(image);
-
-            // Convert the resized image to Minecraft color codes
-            int colors[128 * 128];
-            for (int y = 0; y < 128; y++) {
-                for (int x = 0; x < 128; x++) {
-                    int index = (y * 128 + x) * 3;
-                    unsigned char r = resized_image[index];
-                    unsigned char g = resized_image[index + 1];
-                    unsigned char b = resized_image[index + 2];
-                    colors[y * 128 + x] = find_nearest_minecraft_color(r, g, b);
-                }
-            }
-
-            // Create the output file path
-            char output_path[512];
-            snprintf(output_path, sizeof(output_path), "%s/map_%d.dat", output_directory, map_count++);
-
-            // Save the Minecraft map
-            if (fill_and_save_byte_array(output_path, colors) != 0) {
-                fprintf(stderr, "Failed to save Minecraft map: %s\n", output_path);
-            }
-
-            // Free the resized image
-            free(resized_image);
+        if (strcasestr(entry->d_name, ".png") || strcasestr(entry->d_name, ".jpg")) {
+            filenames = realloc(filenames, sizeof(char *) * (file_count + 1));
+            filenames[file_count] = strdup(entry->d_name);
+            file_count++;
         }
     }
-
     closedir(dp);
+
+    // Sort the filenames
+    qsort(filenames, file_count, sizeof(char *), compare_filenames);
+
+    int map_count = 0; // Counter for the processed maps
+
+    // Process each file in sorted order
+    for (size_t i = 0; i < file_count; i++) {
+        char input_path[512];
+        snprintf(input_path, sizeof(input_path), "%s/%s", input_directory, filenames[i]);
+
+        printf("Processing file: %s\n", input_path); // Debugging output
+
+        // Load the image
+        int width, height, channels;
+        unsigned char *image = stbi_load(input_path, &width, &height, &channels, 3);
+        if (!image) {
+            fprintf(stderr, "Failed to load image: %s\n", input_path);
+            free(filenames[i]);
+            continue;
+        }
+
+        // Calculate new dimensions
+        int new_width, new_height;
+        if (width > height) {
+            new_width = 128;
+            new_height = (height * 128) / width;
+        } else {
+            new_height = 128;
+            new_width = (width * 128) / height;
+        }
+
+        // Resize the image
+        unsigned char *resized_image = malloc(128 * 128 * 3);
+        memset(resized_image, 0, 128 * 128 * 3); // Fill with black (0, 0, 0)
+        stbir_resize_uint8(image, width, height, 0, resized_image, new_width, new_height, 0, 3);
+
+        // Free the original image
+        stbi_image_free(image);
+
+        // Convert the resized image to Minecraft color codes
+        int colors[128 * 128];
+        for (int y = 0; y < 128; y++) {
+            for (int x = 0; x < 128; x++) {
+                int index = (y * 128 + x) * 3;
+                unsigned char r = resized_image[index];
+                unsigned char g = resized_image[index + 1];
+                unsigned char b = resized_image[index + 2];
+                colors[y * 128 + x] = find_nearest_minecraft_color(r, g, b);
+            }
+        }
+
+        // Create the output file path
+        char output_path[512];
+        snprintf(output_path, sizeof(output_path), "%s/map_%d.dat", output_directory, map_count++);
+
+        printf("Saving map to: %s\n", output_path); // Debugging output
+
+        // Save the Minecraft map
+        if (fill_and_save_byte_array(output_path, colors) != 0) {
+            fprintf(stderr, "Failed to save Minecraft map: %s\n", output_path);
+        }
+
+        // Free the resized image
+        free(resized_image);
+        free(filenames[i]);
+    }
+
+    free(filenames);
 }
 int main(int argc, char *argv[]) {
     if (argc != 3) {
